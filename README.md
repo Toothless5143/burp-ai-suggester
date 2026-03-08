@@ -1,6 +1,6 @@
 # burp-ai-suggester
 
-A Burp Suite extension (Montoya API) that analyses every HTTP request parameter and suggests potential attack vectors — complete with 2–3 sample payloads per attack type.
+A Burp Suite extension (Montoya API) that analyses every HTTP request parameter and suggests potential attack vectors — powered by **Ollama** (local LLM) or built-in offline rules — with 2–3 sample payloads per finding.
 
 ---
 
@@ -9,10 +9,12 @@ A Burp Suite extension (Montoya API) that analyses every HTTP request parameter 
 | Feature | Detail |
 |---|---|
 | **13 attack types covered** | SQL Injection, XSS, OS Command Injection, Path Traversal, SSRF, Open Redirect, SSTI, XXE, LDAP Injection, NoSQL Injection, IDOR, LFI/RFI, HTTP Header Injection |
-| **Built-in rules** | Keyword heuristics on parameter names + value patterns – works entirely offline |
-| **AI-enhanced mode** | Optionally uses the OpenAI Chat API for richer, context-aware suggestions |
+| **Built-in rules** | Keyword heuristics on parameter names + value patterns – works entirely offline, no LLM needed |
+| **Ollama mode** | Sends each parameter to your local (or remote) Ollama instance for richer, context-aware suggestions |
+| **Configurable LLM endpoint** | Host / IP, port, and model are all editable from the Settings tab – point at any host running Ollama |
+| **Editable system prompt** | The exact prompt sent to the LLM is fully editable; reset to default with one click |
 | **Right-click integration** | "AI Suggester: Analyze Request" context menu item in Proxy, Repeater, Target, Intruder |
-| **Dedicated suite tab** | "AI Suggester" tab in the Burp toolbar with an Analyzer and Settings sub-tab |
+| **Dedicated suite tab** | "AI Suggester" tab in the Burp toolbar with Analyzer and Settings sub-tabs |
 | **Per-parameter detail** | Coloured risk levels (CRITICAL / HIGH / MEDIUM), descriptions, and copy-ready payloads |
 
 ---
@@ -24,6 +26,7 @@ A Burp Suite extension (Montoya API) that analyses every HTTP request parameter 
 | Java | 11 or newer (17 recommended) |
 | Maven | 3.6+ |
 | Burp Suite | Professional or Community Edition 2022.9.1+ (Montoya API) |
+| Ollama *(optional)* | Any version with at least one model pulled |
 
 ---
 
@@ -63,15 +66,22 @@ target/burp-ai-suggester-1.0.0.jar
 4. The request is analysed and each detected parameter is listed with its suggested attacks.  
 5. Click a row in the parameter table to see full attack descriptions and sample payloads.
 
-### AI-enhanced mode (optional)
+### Ollama mode (optional)
 
-1. Go to the **AI Suggester → Settings** tab.  
-2. Select **AI-enhanced** and enter your **OpenAI API key** (`sk-…`).  
-3. Choose a model (`gpt-4o`, `gpt-4-turbo`, `gpt-4`, `gpt-3.5-turbo`).  
-4. Click **Test Connection** to verify the key, then **Save**.  
-5. Re-run the analysis – each parameter now gets an additional `✨ AI` badge with richer suggestions.
+1. Start Ollama and pull a model, e.g.:
+   ```bash
+   ollama pull llama3.2
+   ```
+2. Go to the **AI Suggester → Settings** tab.  
+3. Select **Ollama** mode.  
+4. Set **Host / IP** to the machine running Ollama (default: `localhost`; use the IP/hostname for a remote box).  
+5. Set **Port** (default: `11434`).  
+6. Choose or type a **Model** name (any model you have pulled).  
+7. Optionally edit the **System Prompt** – this is sent verbatim to the LLM before each analysis.  
+8. Click **Test Connection** to verify, then **Save**.  
+9. Re-run the analysis – each parameter now gets an additional `✨ AI` badge with richer suggestions.
 
-> Your API key is stored in memory only and is not persisted between Burp sessions.
+> No API key is required for Ollama. Settings are stored in memory only and reset when Burp restarts.
 
 ---
 
@@ -80,7 +90,7 @@ target/burp-ai-suggester-1.0.0.jar
 | Attack | Risk | Parameter name signals |
 |---|---|---|
 | SQL Injection | 🟠 HIGH | `id`, `search`, `query`, `user`, `order`, … |
-| NoSQL Injection | 🟠 HIGH | JSON-type params, same keywords as SQLi |
+| NoSQL Injection | 🟠 HIGH | JSON-type params, `filter`, `query`, `match`, … |
 | Cross-Site Scripting | 🟠 HIGH | `message`, `comment`, `name`, `q`, `callback`, … |
 | OS Command Injection | 🔴 CRITICAL | `cmd`, `exec`, `ping`, `file`, `path`, … |
 | Path Traversal | 🟠 HIGH | `file`, `dir`, `path`, `template`, `page`, … |
@@ -101,7 +111,8 @@ target/burp-ai-suggester-1.0.0.jar
 src/main/java/com/burpai/
 ├── BurpAISuggester.java          Extension entry point (implements BurpExtension)
 ├── AttackSuggester.java          Built-in rule engine
-├── AiApiClient.java              OpenAI Chat API client
+├── AiApiClient.java              Ollama / OpenAI-compatible chat completions client
+├── LlmConfig.java                Config record: host, port, model, systemPrompt
 ├── model/
 │   ├── AttackType.java           Enum of attack types with payloads
 │   ├── AttackSuggestion.java     Single suggestion (name, risk, description, payloads)
@@ -109,7 +120,7 @@ src/main/java/com/burpai/
 ├── ui/
 │   ├── MainPanel.java            Root suite-tab panel
 │   ├── AnalyzerPanel.java        Analyzer sub-tab (table + detail)
-│   └── SettingsPanel.java        Settings sub-tab (API key, model)
+│   └── SettingsPanel.java        Settings sub-tab (host, port, model, system prompt)
 └── handler/
     └── AttackContextMenuProvider.java  Right-click context menu
 ```

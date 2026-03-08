@@ -134,12 +134,11 @@ public class AttackSuggester {
     /**
      * Analyses every parameter in the request.
      *
-     * @param request the HTTP request to analyse
-     * @param apiKey  optional OpenAI API key; pass {@code null} to use built-in rules only
-     * @param model   OpenAI model name (e.g. "gpt-4o") – ignored when apiKey is null
+     * @param request   the HTTP request to analyse
+     * @param llmConfig LLM connection config; pass {@code null} to use built-in rules only
      * @return a list of {@link ParameterAnalysis} objects, one per parameter
      */
-    public List<ParameterAnalysis> analyze(HttpRequest request, String apiKey, String model) {
+    public List<ParameterAnalysis> analyze(HttpRequest request, LlmConfig llmConfig) {
         List<ParsedHttpParameter> params = request.parameters();
         String url    = request.url();
         String method = request.method();
@@ -159,13 +158,15 @@ public class AttackSuggester {
             List<AttackSuggestion> suggestions = buildSuggestions(name, value, type, url, method, param.type());
 
             // Optionally enrich with AI
-            if (apiKey != null && !apiKey.isBlank()) {
+            if (llmConfig != null) {
                 try {
                     List<AttackSuggestion> aiSuggestions =
-                            AiApiClient.getSuggestions(url, method, name, value, type, apiKey, model);
+                            AiApiClient.getSuggestions(url, method, name, value, type, llmConfig);
                     suggestions = merge(suggestions, aiSuggestions);
-                } catch (Exception ignored) {
+                } catch (Exception e) {
                     // If AI call fails, fall back to built-in suggestions only
+                    System.err.println("[AI Suggester] LLM call failed for param '"
+                            + name + "': " + e.getMessage());
                 }
             }
 

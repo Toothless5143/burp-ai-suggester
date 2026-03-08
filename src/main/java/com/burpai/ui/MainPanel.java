@@ -2,6 +2,7 @@ package com.burpai.ui;
 
 import burp.api.montoya.MontoyaApi;
 import burp.api.montoya.http.message.requests.HttpRequest;
+import com.burpai.LlmConfig;
 
 import javax.swing.*;
 import java.awt.*;
@@ -13,8 +14,8 @@ import java.awt.*;
  * <ul>
  *   <li><b>Analyzer</b> – displays the request under analysis and per-parameter
  *       attack suggestions.</li>
- *   <li><b>Settings</b> – lets the user configure the analysis mode and OpenAI
- *       API credentials.</li>
+ *   <li><b>Settings</b> – lets the user configure analysis mode, Ollama host/port,
+ *       model, and system prompt.</li>
  * </ul>
  *
  * <p>The context menu provider and any other component that needs to trigger
@@ -52,12 +53,12 @@ public class MainPanel extends JPanel {
         SwingUtilities.invokeLater(() -> tabs.setSelectedIndex(0));
     }
 
-    /** Returns the configured OpenAI API key (may be empty). */
-    public String getApiKey() { return settingsPanel.getApiKey(); }
+    /**
+     * Returns a fully populated {@link LlmConfig} when Ollama mode is active,
+     * or {@code null} when built-in-rules-only mode is selected.
+     */
+    public LlmConfig getLlmConfig() { return settingsPanel.getLlmConfig(); }
 
-    /** Returns the selected OpenAI model name. */
-    public String getSelectedModel() { return settingsPanel.getSelectedModel(); }
-
-    /** Returns true if AI-enhanced mode is selected AND an API key is set. */
+    /** Returns true if Ollama mode is selected in settings. */
     public boolean isUseAi() { return settingsPanel.isUseAi(); }
 }

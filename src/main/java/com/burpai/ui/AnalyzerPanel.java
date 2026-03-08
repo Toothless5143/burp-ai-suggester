@@ -1,9 +1,9 @@
 package com.burpai.ui;
 
 import burp.api.montoya.MontoyaApi;
-import burp.api.montoya.http.message.params.ParsedHttpParameter;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import com.burpai.AttackSuggester;
+import com.burpai.LlmConfig;
 import com.burpai.model.AttackSuggestion;
 import com.burpai.model.ParameterAnalysis;
 
@@ -173,14 +173,13 @@ public class AnalyzerPanel extends JPanel {
         detailPane.setText(buildSpinnerHtml());
         setStatus("Analyzing " + currentRequest.parameters().size() + " parameter(s)…");
 
-        String apiKey = mainPanel.getApiKey();
-        String model  = mainPanel.getSelectedModel();
-        boolean useAi = mainPanel.isUseAi() && !apiKey.isEmpty();
+        LlmConfig llmConfig = mainPanel.getLlmConfig();   // null = built-in only
+        boolean useAi = llmConfig != null;
 
         SwingWorker<List<ParameterAnalysis>, Void> worker = new SwingWorker<>() {
             @Override
             protected List<ParameterAnalysis> doInBackground() {
-                return suggester.analyze(currentRequest, useAi ? apiKey : null, model);
+                return suggester.analyze(currentRequest, llmConfig);
             }
 
             @Override
@@ -198,7 +197,9 @@ public class AnalyzerPanel extends JPanel {
                         showDetail(currentResults.get(0));
                         long total = currentResults.stream()
                                 .mapToLong(r -> r.getSuggestions().size()).sum();
-                        String src = useAi ? "AI-enhanced" : "built-in rules";
+                        String src = useAi
+                                ? "Ollama (" + llmConfig.model() + ")"
+                                : "built-in rules";
                         setStatus("Analysis complete (" + src + "): "
                                 + currentResults.size() + " parameter(s), "
                                 + total + " suggestion(s) found.");
@@ -248,7 +249,7 @@ public class AnalyzerPanel extends JPanel {
                 + "<li>Select <b>AI Suggester: Analyze Request</b>.</li>"
                 + "<li>Select a parameter in the table on the left to see attack suggestions.</li>"
                 + "</ol>"
-                + "<p style='color:#888; font-size:0.9em;'>Configure AI mode in the <b>Settings</b> tab.</p>"
+                + "<p style='color:#888; font-size:0.9em;'>Configure Ollama in the <b>Settings</b> tab.</p>"
                 + "</body></html>";
     }
 

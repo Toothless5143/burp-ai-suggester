@@ -11,64 +11,66 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Thin wrapper around the OpenAI Chat Completions API.
+ * Client for any OpenAI-compatible local LLM (Ollama, LM Studio, llama.cpp, etc.).
  *
- * <p>The AI is asked to analyse a single HTTP request parameter and to return
- * a JSON array of attack suggestions. All networking happens synchronously on
- * the calling thread – callers should run this off the Swing EDT.
+ * <p>All connection details (host, port, model, system prompt) come from a
+ * {@link LlmConfig} object so nothing is hardcoded. Networking happens
+ * synchronously on the calling thread — callers must run this off the Swing EDT.
  */
 public final class AiApiClient {
 
-    private static final String OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-    private static final Duration TIMEOUT   = Duration.ofSeconds(30);
-    private static final Gson GSON          = new Gson();
+    private static final Gson GSON = new Gson();
 
-    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
-            .connectTimeout(TIMEOUT)
-            .build();
+    // The HttpClient itself has no fixed timeout; per-request timeouts come from LlmConfig.
+    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder().build();
 
     private AiApiClient() {}
 
     /**
-     * Calls the OpenAI API and returns attack suggestions for the given parameter.
+     * Calls the local LLM and returns attack suggestions for one HTTP parameter.
      *
-     * @param url       the full request URL
-     * @param method    the HTTP method
-     * @param paramName the parameter name to analyse
-     * @param paramValue the parameter value to analyse
-     * @param paramType the parameter type (URL / Body / Cookie / JSON …)
-     * @param apiKey    the OpenAI API key
-     * @param model     the model to use (e.g. "gpt-4o", "gpt-3.5-turbo")
-     * @return list of {@link AttackSuggestion} objects parsed from the AI response
+     * @param requestUrl  the full URL of the HTTP request being analysed
+     * @param method      the HTTP method (GET, POST, …)
+     * @param paramName   the parameter name to analyse
+     * @param paramValue  the parameter value to analyse
+     * @param paramType   the parameter type label (URL / Body / Cookie / JSON …)
+     * @param config      LLM connection config (host, port, model, system prompt)
+     * @return list of {@link AttackSuggestion} objects parsed from the LLM response
      * @throws IOException          if the HTTP call fails
      * @throws InterruptedException if the thread is interrupted
      */
-    public static List<AttackSuggestion> getSuggestions(String url, String method,
+    public static List<AttackSuggestion> getSuggestions(String requestUrl, String method,
                                                         String paramName, String paramValue,
                                                         String paramType,
-                                                        String apiKey, String model)
+                                                        LlmConfig config)
             throws IOException, InterruptedException {
 
-        String prompt = buildPrompt(url, method, paramName, paramValue, paramType);
-        String requestBody = buildRequestBody(model, prompt);
+        String userPrompt   = buildUserPrompt(requestUrl, method, paramName, paramValue, paramType);
+        String requestBody  = buildRequestBody(config, userPrompt);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(OPENAI_URL))
-                .timeout(TIMEOUT)
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + apiKey)
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create(config.endpointUrl()))
+                .timeout(config.timeout())
+                .header("Content-Type", "application/json");
+
+        // Attach Authorization header only when an API key is provided
+        String apiKey = config.apiKey();
+        if (!apiKey.isBlank()) {
+            builder.header("Authorization", "Bearer " + apiKey);
+        }
+
+        HttpRequest request = builder
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                 .build();
 
         HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() != 200) {
-            throw new IOException("OpenAI API returned HTTP " + response.statusCode()
+            throw new IOException("LLM endpoint returned HTTP " + response.statusCode()
                     + ": " + response.body());
         }
 
@@ -79,42 +81,30 @@ public final class AiApiClient {
     // Private helpers
     // -----------------------------------------------------------------------
 
-    private static String buildPrompt(String url, String method,
-                                      String paramName, String paramValue, String paramType) {
-        return """
-                You are an expert web application penetration tester.
-                Analyse the following HTTP request parameter for security vulnerabilities.
-                
-                Request details:
-                  URL    : %s
-                  Method : %s
-                  Parameter name  : %s
-                  Parameter value : %s
-                  Parameter type  : %s
-                
-                Respond ONLY with a valid JSON array (no markdown, no explanation).
-                Each element must follow this exact schema:
-                {
-                  "attack_type": "<attack name>",
-                  "risk_level":  "CRITICAL|HIGH|MEDIUM|LOW",
-                  "description": "<one-sentence explanation>",
-                  "payloads":    ["<payload1>", "<payload2>", "<payload3>"]
-                }
-                
-                Provide 2–4 relevant attack types. If no attack is applicable, return [].
-                """.formatted(url, method, paramName, paramValue, paramType);
+    /** Builds the user-facing prompt with the parameter details. */
+    private static String buildUserPrompt(String requestUrl, String method,
+                                          String paramName, String paramValue, String paramType) {
+        return "Analyse the following HTTP request parameter for security vulnerabilities.\n\n"
+                + "Request details:\n"
+                + "  URL    : " + requestUrl + "\n"
+                + "  Method : " + method + "\n"
+                + "  Parameter name  : " + paramName + "\n"
+                + "  Parameter value : " + paramValue + "\n"
+                + "  Parameter type  : " + paramType + "\n";
     }
 
-    private static String buildRequestBody(String model, String userPrompt) {
+    /** Builds the JSON body for the chat completions request. */
+    private static String buildRequestBody(LlmConfig config, String userPrompt) {
         JsonObject body = new JsonObject();
-        body.addProperty("model", model);
+        body.addProperty("model", config.model());
         body.addProperty("temperature", 0.2);
+        body.addProperty("stream", false);
 
         JsonArray messages = new JsonArray();
 
         JsonObject system = new JsonObject();
         system.addProperty("role", "system");
-        system.addProperty("content", "You are a web application security expert specialising in penetration testing.");
+        system.addProperty("content", config.systemPrompt());
         messages.add(system);
 
         JsonObject user = new JsonObject();
@@ -126,6 +116,7 @@ public final class AiApiClient {
         return GSON.toJson(body);
     }
 
+    /** Parses the chat completions JSON response into {@link AttackSuggestion} objects. */
     private static List<AttackSuggestion> parseResponse(String responseBody) {
         List<AttackSuggestion> results = new ArrayList<>();
         try {
@@ -160,8 +151,7 @@ public final class AiApiClient {
             }
         } catch (Exception e) {
             // If parsing fails, return an empty list so callers fall back to built-in rules.
-            // The original exception details: e.getClass().getSimpleName() + ": " + e.getMessage()
-            System.err.println("[AI Suggester] Failed to parse AI response: "
+            System.err.println("[AI Suggester] Failed to parse LLM response: "
                     + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
         return results;
