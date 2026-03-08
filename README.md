@@ -1,0 +1,1 @@
+# burp-ai-suggester
